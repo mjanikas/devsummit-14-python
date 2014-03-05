@@ -416,10 +416,10 @@ def drought_analysis(date_string):
     lf = DM.SaveToLayerFile(wine_drought[0], OS.path.join(working_dir, '{}.lyr'.format(fl[0])))
     DM.ApplySymbologyFromLayer(lf, lyr_template)
 
-    pw = "test" #GETPASS.getpass("Enter AGOL password:")
+    pw = "PASSWORDHERE" #GETPASS.getpass("Enter AGOL password:")
     service_name = "Drought_and_Wine"
 
-    agol = AGOLHandler("analytics", pw, service_name)
+    agol = AGOLHandler("USERNAMEHERE", pw, service_name)
     
     publish_service(agol, service_name, mxd_path, lf[0])
     TIME.sleep(5)
