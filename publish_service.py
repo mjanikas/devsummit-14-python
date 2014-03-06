@@ -30,6 +30,7 @@ class AGOLHandler(object):
             self.exists = True
         else:
             self.exists = False
+        self.hiveNumber = None
 
     def findItem(self, findType):
         """Find the itemID of whats being updated."""
@@ -38,7 +39,7 @@ class AGOLHandler(object):
                       'token': self.token,
                       'q': "title:\""+ self.serviceName + "\"AND owner:\"" + self.username + "\" AND type:\"" + findType + "\""}
 
-        jsonResponse = send_AGOL_Reqeust(searchURL, query_dict)
+        jsonResponse = send_AGOL_Request(searchURL, query_dict)
         if jsonResponse['total'] == 0:
             return None
         else:
@@ -52,7 +53,7 @@ class AGOLHandler(object):
                       'token': self.token,
                       'q': "title:\""+ self.serviceName + "\"AND owner:\"" + self.username + "\" AND type:\"" + findType + "\""}
 
-        jsonResponse = send_AGOL_Reqeust(searchURL, query_dict)
+        jsonResponse = send_AGOL_Request(searchURL, query_dict)
         if jsonResponse['total'] == 0:
             return None
         else:
@@ -93,15 +94,26 @@ class AGOLHandler(object):
                       'f': 'json',
                       'token': self.token}
 
-        jsonResponse = send_AGOL_Reqeust(publishURL, query_dict)
+        jsonResponse = send_AGOL_Request(publishURL, query_dict)
         print("successfully updated...{}...").format(jsonResponse['services'])
+
+        #### Get Hive Number ####
+        encodedURL = jsonResponse['services'][0]['encodedServiceURL']
+        if "services1.arcgis.com" in encodedURL:
+            self.hiveNumber = 1
+        elif "services2.arcgis.com" in encodedURL:
+            self.hiveNumber = 2
+        else:
+            self.hiveNumber = None
+
+        print "AGOL Hive Number: {0}".format(self.hiveNumber)
 
     def delete_existing(self, item_id):
         """Delete existing feature service."""
         deleteURL = self.http + '/content/users/{}/items/{}/delete'.format(self.username, item_id)
         if not deleteURL == '':
             query_dict = {'f': 'json', 'token': self.token}
-            jsonResponse = send_AGOL_Reqeust(deleteURL, query_dict)
+            jsonResponse = send_AGOL_Request(deleteURL, query_dict)
             print("successfully deleted...{}...").format(jsonResponse['itemId'])
 
     def upload(self, fileName, tags, description):
@@ -139,7 +151,7 @@ class AGOLHandler(object):
             print(itemPartJSON)
             SYS.exit()
 
-def enrich(service, output_service, rest_token):
+def enrich(agol, service, output_service, rest_token):
 
     service_name = """{{"serviceProperties":{{"name":"{}"}}}}""".format(output_service)
     job_data = {"inputLayer":  """{{"url":"{}"}}""".format(service),
@@ -150,7 +162,14 @@ def enrich(service, output_service, rest_token):
 ##    analysis_url = "http://analysis1.arcgis.com/arcgis/rest/services/tasks/GPServer/EnrichLayer"
 
     # Comment analysis_url below when using angp portal
-    analysis_url = "http://analysis.arcgis.com/arcgis/rest/services/tasks/GPServer/EnrichLayer"
+
+    #### Assure Hive Number ####
+    if agol.hiveNumber != None:
+        analysis_url = "http://analysis{0}.arcgis.com/arcgis/rest/services/tasks/GPServer/EnrichLayer".format(agol.hiveNumber)
+    else:
+        analysis_url = "http://analysis.arcgis.com/arcgis/rest/services/tasks/GPServer/EnrichLayer"
+    print "Analysis URL: {0}".format(analysis_url)
+    
     url = "{}/submitJob?token={}".format(analysis_url, rest_token)
     headers = {"Accept":"*/*",
                "Connection":"keep-alive",
@@ -249,7 +268,7 @@ def make_sd_draft(MXD, serviceName, tempDir):
 
     return newSDdraft
 
-def send_AGOL_Reqeust(URL, query_dict):
+def send_AGOL_Request(URL, query_dict):
     """Helper function which takes a URL
     and a dictionary and sends the request."""
     query_string = URLLIB.urlencode(query_dict)
@@ -264,62 +283,6 @@ def send_AGOL_Reqeust(URL, query_dict):
         print("\nfailed:")
         print(jsonOuput)
         SYS.exit()
-
-def publish(itemID):
-    """Publish the existing SD on AGOL."""
-    publishURL = agol.http+'/content/users/{}/publish'.format(agol.username)
-
-    fs_id = agol.findItem('Feature Service')
-    if fs_id:
-        delete_existing(fs_id)
-
-    query_dict = {'itemID': itemID,
-              'filetype': 'serviceDefinition',
-              'f': 'json',
-              'token': agol.token}
-
-    jsonResponse = send_AGOL_Reqeust(publishURL, query_dict)
-    print("successfully updated...{}...").format(jsonResponse['services'])
-
-    return jsonResponse['services'][0]['serviceItemId']
-
-def update_sddraft(sddraft_file, soe, enabled):
-    """Updates the sddraft file to
-    disable or enable Server Object Extentions.
-    """
-    doc = DOM.parse(sddraft_file)
-
-    # This is where the server object extension (SOE) names are defined.
-    # Valid only for ArcGIS Server and not hosted services.
-    typeNames = doc.getElementsByTagName('TypeName')
-    for typeName in typeNames:
-        # Get the SOE (TypeName) we want to enable/disable.
-        if typeName.firstChild.data == soe:
-            extension = typeName.parentNode
-            for extElement in extension.childNodes:
-                if extElement.tagName == 'Enabled':
-                    extElement.firstChild.data = enabled
-
-    # Update draft file to enable overwritting.
-    newType = 'esriServiceDefinitionType_Replacement'
-    newState = 'esriSDState_Published'
-    myTagsType = doc.getElementsByTagName('Type')
-    for myTagType in myTagsType:
-        if myTagType.parentNode.tagName == 'SVCManifest':
-            if myTagType.hasChildNodes():
-                myTagType.firstChild.data = newType
-
-    myTagsState = doc.getElementsByTagName('State')
-    for myTagState in myTagsState:
-        if myTagState.parentNode.tagName == 'SVCManifest':
-            if myTagState.hasChildNodes():
-                myTagState.firstChild.data = newState
-
-    # Output to a new sddraft.
-    outXml = sddraft_file
-    f = open(outXml, 'w')
-    doc.writexml(f)
-    f.close()
 
 def publish_service(agol, service_name, mxd_template, layer_file):
     """Publishe the service."""
@@ -385,7 +348,7 @@ def drought_analysis(date_string):
     DM.ApplySymbologyFromLayer(lf, lyr_template)
 
     pw = "test" #GETPASS.getpass("Enter AGOL password:")
-    service_name = "Drought_and_Wine"
+    service_name = "Drought_Wine_Service"
 
     agol = AGOLHandler("analytics", pw, service_name)
     
@@ -393,13 +356,11 @@ def drought_analysis(date_string):
     TIME.sleep(5)
     fs_url = agol.findItemURL('Feature Service')
     TIME.sleep(35)
-    gp_url, jsondata = enrich(fs_url + '/0', '{}_Enriched'.format(service_name), agol.token)
+    gp_url, jsondata = enrich(agol, fs_url + '/0', '{}_Enriched'.format(service_name), agol.token)
     check_job_status(gp_url, jsondata, agol.token)
 
     DM.Delete(OS.path.join(working_dir, shp_name))
     DM.Delete(OS.path.join(working_dir, lf[0]))
-
-
 
 if __name__ == '__main__':
     date_string = "20140225"
