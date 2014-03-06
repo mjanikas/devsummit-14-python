@@ -86,7 +86,7 @@ class AGOLHandler(object):
 
         fs_id = self.findItem('Feature Service')
         if fs_id:
-            self.delete_existing(fs_id)
+            delete_existing(fs_id)
 
         query_dict = {'itemID': itemID,
                       'filetype': 'serviceDefinition',
@@ -202,6 +202,16 @@ def check_job_status(analysis_url, json_data, rest_token):
             TIME.sleep(10)
 
 
+def delete_existing(item_id):
+    """Delete existing feature service."""
+    deleteURL = agol.http + '/content/users/{}/items/{}/delete'.format(agol.username, item_id)
+    if not deleteURL == '':
+        query_dict = {'f': 'json',
+                      'token': agol.token}
+        jsonResponse = send_AGOL_Reqeust(deleteURL, query_dict)
+        print("successfully deleted...{}...").format(jsonResponse['itemId'])
+
+
 def make_sd_draft(MXD, serviceName, tempDir):
     """Ceate a draft SD and modify the properties to overwrite an existing FS."""
     ARCPY.env.overwriteOutput = True
@@ -248,6 +258,37 @@ def make_sd_draft(MXD, serviceName, tempDir):
         doc.write(f, 'utf-8')
 
     return newSDdraft
+
+def upload(agol, fileName, tags, description):
+    """Overwrite the SD on AGOL with the new SD.
+    This method uses 3rd party module: requests.
+    """
+    updateURL = agol.http+'/content/users/{}/addItem'.format(agol.username)
+
+    #sd_id = agol.findItem('Service Definition')
+    #if sd_id:
+    #    delete_existing(sd_id)
+
+    filesUp = {"file": open(fileName, 'rb')}
+
+    url = updateURL + "?f=json&token="+agol.token+ \
+        "&filename="+fileName+ \
+        "&type=Service Definition"\
+        "&title="+agol.serviceName+ \
+        "&tags="+tags+\
+        "&description="+description
+
+    response = REQUESTS.post(url, files=filesUp);
+    itemPartJSON = JSON.loads(response.text)
+
+    if "success" in itemPartJSON:
+        itemID = itemPartJSON['id']
+        print("uploaded SD:   {}").format(itemID)
+        return itemID
+    else:
+        print("\n.sd file not uploaded. Check the errors and try again.\n")
+        print(itemPartJSON)
+        SYS.exit()
 
 def send_AGOL_Reqeust(URL, query_dict):
     """Helper function which takes a URL
@@ -343,11 +384,58 @@ def publish_service(agol, service_name, mxd_template, layer_file):
 
     # Upload (publish) map service.
     id = agol.upload(OS.path.join(sd_dir, "drought.sd"), "US Drought", "Current US Drought Conditions.")
-    agol.publish(id)
+    publish(id)
 
 def drought_analysis(date_string):
     ARCPY.env.overwriteOutput = True
-    working_dir = r"C:\Data\git\devsummit-14-python"
+    working_dir = r"C:\Data\DevSummit14"
+    zip_name = "USDM_" + date_string + "_M.zip"
+    url = "http://droughtmonitor.unl.edu/data/shapefiles_m/" + zip_name
+    mxd_path = OS.path.join(working_dir, "MapTemplate.mxd")
+    lyr_template = OS.path.join(working_dir, "CurrentDroughtConditions.lyr")
+    zip_name = OS.path.basename(url)
+
+    drought_zip_file = URLLIB.URLopener()
+    dzf = drought_zip_file.retrieve(url, OS.path.join(r"C:\Temp", zip_name))
+    zf = ZIPFILE.ZipFile(dzf[0], "r")
+    shp_name = [n for n in zf.namelist() if n.endswith('.shp')][0]
+    zf.extractall(working_dir)
+
+    fl = DM.MakeFeatureLayer(OS.path.join(working_dir, shp_name), OS.path.splitext(shp_name)[0])
+    
+    #### Add Winery Data ####
+    beerWinePath = OS.path.join(working_dir, "BeerWine", 
+                                "BeerWine.gdb", "BeerWine")
+    intermediate_output = OS.path.join(working_dir, "BeerWine", 
+                                "BeerWine.gdb", "BeerWineDrought")
+    wine = DM.MakeFeatureLayer(beerWinePath, "BeerWine")
+    wine_drought = DM.MakeFeatureLayer(intermediate_output, "BeerWineDrought")
+    DM.SelectLayerByAttribute(wine[0], "NEW_SELECTION", "Type = 'Winery'")
+    ANALYSIS.SpatialJoin(fl[0], wine[0], intermediate_output, "JOIN_ONE_TO_ONE", "KEEP_ALL")
+
+    lf = DM.SaveToLayerFile(wine_drought[0], OS.path.join(working_dir, '{}.lyr'.format(fl[0])))
+    DM.ApplySymbologyFromLayer(lf, lyr_template)
+
+    pw = "test" #GETPASS.getpass("Enter AGOL password:")
+    service_name = "Drought_and_Wine"
+
+    agol = AGOLHandler("analytics", pw, service_name)
+    
+    publish_service(agol, service_name, mxd_path, lf[0])
+    TIME.sleep(5)
+    fs_url = agol.findItemURL('Feature Service')
+    TIME.sleep(25)
+    gp_url, jsondata = enrich(fs_url + '/0', '{}_Enriched'.format(service_name), agol.token)
+    check_job_status(gp_url, jsondata, agol.token)
+
+    DM.Delete(OS.path.join(working_dir, shp_name))
+    DM.Delete(OS.path.join(working_dir, lf[0]))
+
+
+if __name__ == '__main__':
+    date_string = "20140225"
+    ARCPY.env.overwriteOutput = True
+    working_dir = r"C:\Data\DevSummit14"
     zip_name = "USDM_" + date_string + "_M.zip"
     url = "http://droughtmonitor.unl.edu/data/shapefiles_m/" + zip_name
     mxd_path = OS.path.join(working_dir, "MapTemplate.mxd")
@@ -398,10 +486,3 @@ def drought_analysis(date_string):
 
     DM.Delete(OS.path.join(working_dir, shp_name))
     DM.Delete(OS.path.join(working_dir, lf[0]))
-
-
-
-if __name__ == '__main__':
-    date_string = "20140225"
-    drought_analysis(date_string)
-
