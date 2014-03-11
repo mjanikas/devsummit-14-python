@@ -8,12 +8,12 @@ An application that utilizes the logic given by https://github.com/arcpy/update-
 Special Instructions
 --------------------
 
-Edit the 'publish_service.py' file and add your Username/Password
+Edit the `publish_service.py` file and add your Username/Password
 Information.  Search for USERNAMEHERE and PASSWORDHERE to locate where the
 information is necessary.  
 
-You must also change your 'working_dir' variable within the
-'drought_analysis' function.
+You must also change your `working_dir` variable within the
+`drought_analysis` function.
 
 The python script does not contain the automation portion of the workflow
 to avoid unnecessary/unwanted calls to ArcGIS Online.  You may use the
